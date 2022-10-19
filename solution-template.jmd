@@ -28,21 +28,90 @@ hours = 1:24
 demand = [1517, 1486, 1544, 1733, 2058, 2470, 2628, 2696, 2653, 2591, 2626, 2714, 2803, 2842, 2891,  2821, 3017, 3074, 2957,  2487, 2249, 1933, 1684, 1563]
 wind_cf = [0.58, 0.57, 0.55, 0.28, 0.14, 0.21, 0.03, 0.04, 0.01, 0.04, 0.04, 0.01, 0.04, 0.04, 0.01, 0.01, 0.01, 0.13, 0.30, 0.45, 0.44, 0.57, 0.55, 0.58]
 solar_cf = [0, 0, 0, 0, 0, 0, 0.20, 0.57, 0.80, 0.93, 0.99, 0.99, 0.85, 0.99, 0.95, 0.81, 0.55, 0.12, 0, 0, 0, 0, 0, 0]
+geo_cf = 0.95 * ones(24)
+fossil_cf = ones(24)
+
 ```
 
 # Problem 1
 
 ## Problem 1.1
+The decision variables (alongside their notation) include:
+1. The MW capacity installed for geothermal, coal, natural gas combined cycle gas turbine, natural gas combustion turbine, solar, and wind
+($X_g$, $X_{coal}$, $X_{CCGT}$, $X_{CT}$, $X_{s}$, and $X_{w}$ respectively).
+2. The MW generated per type (geothermal, coal, CCGT, CT, wind, solar) for a given hour of the day t ($Y_{g,t}$, $Y_{coal,t}$, $Y_{CCGT,t}$, $Y_{CT,t}$,
+$Y_{w,t}$, and $Y_{s,t}$ respectively).
+3. Non served energy for a given hour of the day t ($NSE_t$).
 
 ## Problem 1.2
+The objective function to minimize will be the cost per year, defined as follows:
+$Z=total investment cost + total operating cost + NSE cost$, where 
+$total investment cost= 457000X_g+268000X_{coal}+85000X_{CCGT}+62580X_{CT}+92000X_{w}+90000X_{s}$ and
+$total operating cost = 24*365\sum_{t=0}^24 Y_{coal,t} + 35*365\sum_{t=0}^24 Y_{CCGT,t} + 45*365\sum_{t=0}^24 Y_{CT,t}$, and 
+$NSE cost = 9000*365\sum_{t=0}^24 NSE_t$.
+
+The total investment cost is gotten by summing up the products of the investment cost for each type and the capacity installed for each type.
+The total operating cost was gotten by first summing up the MWh generated for each throughout the day for a given type. Each of these sums were multiplied by
+the operating cost for each type, and also by the factor $365 days / 1 year$ to result in annual costs. Since the operating
+cost for renewables is 0, only coal, CCGT, and CT were included. 
+Lastly, the NSE cost was gotten from the penalty for non served energy multiplied by the total NSE for the year and added to the operating costs.
 
 ## Problem 1.3
+The constraints are as follows: 
+1. Capacity constraints: for each hour of the day t, $Y_{g,t}\leq 0.95*X_g$, $Y_{coal,t}\leq X_{coal}$, $Y_{CCGT,t}\leq X_{CCGT}$, $Y_{CT,t}\leq X_{CT}$,
+$Y_{w,t}\leq CF_{w,t}*X_{w}$, and $Y_{s,t}\leq CF_{s,t}*X_{s}$, where $CF_{w,t}$ and $CF_{s,t}$ are the capacity factors at a given hour of the day t
+for wind and solar respectively.
+    This means that the MW generated cannot exceed the capacity of that type given its capacity factor.
+2. Demand constraints: $Y_{g,t} + Y_{coal,t} + Y_{CCGT,t} + Y_{CT,t} + Y_{s,t} + Y_{w,t} + NSE_t = D_t$ where $D_t$ is the demand for a given hour of the day t.
+    This means the combined MW generated from each type has to meet the demand for each hour of the day.
+3. Non-negativity constraints: For a given generator type G, $X_G \geq 0$, and $Y_{G,t} \geq 0$. Also, $NSE_t \geq 0$.
+    This is to prevent the solution from including negative capacity or power generated, which is physically impossible.
+
+This set of constraints is sufficient to fully define the problem, as they account for and bound every single decision variable.
 
 ## Problem 1.4
 
+```julia
+using JuMP
+using HiGHS
+
+gencap = Model(HiGHS.Optimizer)
+generators = ["geothermal","coal","CCGT","CT","wind","solar"]
+G = 1:length(generators) #assigns number to respective generator type
+@variable(gencap,x[G]>=0)
+@variable(gencap,y[G,hours]>=0)
+@variable(gencap,NSE[hours]>=0)
+
+@objective(gencap,Min,[457000;268000;85000;62580;92000;90000]'*x + sum([22*365;35*365;45*365] .* [sum(y[2,:]);sum(y[3,:]);sum(y[4,:])]) + 9000*365*sum(NSE))
+
+capArray = [geo_cf fossil_cf fossil_cf fossil_cf wind_cf solar_cf]'
+@constraint(gencap,capacity[g in G, t in hours], y[g,t]<= capArray[g,t]*x[g])
+@constraint(gencap,load[t in hours],sum(y[:,t])+sum(NSE[t])==demand[t])
+
+print(gencap)
+```
+
 ## Problem 1.5
+```julia; results="hidden"
+optimize!(gencap)
+```
+
+According to the optimal solution, no geothermal nor coal capacity should be installed. `j round(value.(x)[3],digits=2)` MW of CCGT, `j round(value.(x)[4],digits=2)` 
+MW of CT, `j round(value.(x)[5],digits=2)` MW of wind, and `j round(value.(x)[6],digits=2)` MW of solar should be installed. There should also be no non-served energy.
+The total cost is `j round(objective_value(gencap),digits=2)` dollars.
 
 ## Problem 1.6
+```julia
+using Plots
+
+plot(value.(y).data',title="MWh produced for each generator type",label=["geothermal" "coal" "CCGT" "CT" "wind" "solar"], lw=3)
+xlabel!("Hour of the Day")
+ylabel!("MWh produced")
+areaplot(value.(y).data',title="MWh produced for each generator type",label=["geothermal" "coal" "CCGT" "CT" "wind" "solar"])
+xlabel!("Hour of the Day")
+ylabel!("MWh produced")
+
+```
 
 # Problem 2
 
