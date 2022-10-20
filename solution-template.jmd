@@ -48,7 +48,7 @@ The objective function to minimize will be the cost per year, defined as follows
 $Z=total investment cost + total operating cost + NSE cost$, where 
 $total investment cost= 457000X_g+268000X_{coal}+85000X_{CCGT}+62580X_{CT}+92000X_{w}+90000X_{s}$ and
 $total operating cost = 24*365\sum_{t=0}^24 Y_{coal,t} + 35*365\sum_{t=0}^24 Y_{CCGT,t} + 45*365\sum_{t=0}^24 Y_{CT,t}$, and 
-$NSE cost = 9000*365\sum_{t=0}^24 NSE_t$.
+$NSE cost = 1000*365\sum_{t=0}^24 NSE_t$.
 
 The total investment cost is gotten by summing up the products of the investment cost for each type and the capacity installed for each type.
 The total operating cost was gotten by first summing up the MWh generated for each throughout the day for a given type. Each of these sums were multiplied by
@@ -82,7 +82,7 @@ G = 1:length(generators) #assigns number to respective generator type
 @variable(gencap,y[G,hours]>=0)
 @variable(gencap,NSE[hours]>=0)
 
-@objective(gencap,Min,[457000;268000;85000;62580;92000;90000]'*x + sum([22*365;35*365;45*365] .* [sum(y[2,:]);sum(y[3,:]);sum(y[4,:])]) + 9000*365*sum(NSE))
+@objective(gencap,Min,[457000;268000;85000;62580;92000;90000]'*x + sum([22*365;35*365;45*365] .* [sum(y[2,:]);sum(y[3,:]);sum(y[4,:])]) + 1000*365*sum(NSE))
 
 capArray = [geo_cf fossil_cf fossil_cf fossil_cf wind_cf solar_cf]'
 @constraint(gencap,capacity[g in G, t in hours], y[g,t]<= capArray[g,t]*x[g])
@@ -113,15 +113,43 @@ ylabel!("MWh produced")
 
 ```
 
+The main takeaway is that solar is by far the highest contributor mid-day, while CCGT is the highest contributor during the early morning and night.
+Wind contributes some energy during the early morning and night as well. 
+
 # Problem 2
 
 ## Problem 2.1
 
+The main aspect the CO2 limit changes is the constraints on how much electricity can be produced from each generator per year. Specifically,
+$365*(\sum_{t=0}^24 Y_{coal,t} + 0.43\sum_{t=0}^24 Y_{CCGT,t} + 0.55\sum_{t=0}^24 Y_{CT,t} \leq 1.5*10^6)$.
+
+Since there's no incentive to minimize CO2 emissions to be as low as possible, no changes are made to the objective. Also, since CO2 emissions are directly proportional
+to the MWh produced, there's no need to introduce new decision variables.
+
 ## Problem 2.2
+We create a new constraint:
+
+```julia
+@constraint(gencap,emissions,sum(365*[1;0.43;0.55] .*[sum(y[2,:]);sum(y[3,:]);sum(y[4,:])]) <= 1.5*10^6)
+```
+Everything else from Problem 1 stays the same.
 
 ## Problem 2.3
+```julia; results="hidden"
+optimize!(gencap)
+```
+Now, the utility should build `j round(value.(x)[1],digits=2)` MW of geothermal, `j round(value.(x)[2],digits=2)` MW of coal, `j round(value.(x)[3],digits=2)` MW of CCGT,
+`j round(value.(x)[4],digits=2)` MW of CT, `j round(value.(x)[5],digits=2)` MW of wind, and `j round(value.(x)[6],digits=2)` MW of solar.
+The total cost changes to `j round(objective_value(gencap),digits=2)` dollars, and there is no non-served energy.
+
+The main difference from Problem 1 is that geothermal power is now being installed, and this raises the total cost by a noticeable amount.
 
 ## Problem 2.4
+```julia
+areaplot(value.(y).data',title="MWh produced for each generator type",label=["geothermal" "coal" "CCGT" "CT" "wind" "solar"])
+xlabel!("Hour of the Day")
+ylabel!("MWh produced")
+```
 
 ## Problem 2.5
 
